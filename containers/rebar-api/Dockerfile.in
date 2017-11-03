@@ -13,7 +13,7 @@ COPY ssh_config /home/rebar/.ssh/config
 COPY rebar-runner.json /etc/consul.d/rebar-runner.json
 COPY core /opt/digitalrebar/core
 RUN test -d /opt/digitalrebar/core/rails \
-    || { rm -rf /opt/digitalrebar; git clone https://github.com/digitalrebar/digitalrebar /opt/digitalrebar; }
+    || { rm -rf /opt/digitalrebar; git clone https://github.com/mugithi/rebar /opt/digitalrebar; }
 
 RUN apt-get -y update \
   && apt-get -y install software-properties-common wget \
