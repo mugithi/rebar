@@ -1,0 +1,15 @@
+
+dns:
+  extends:
+    file: docker-compose-common.yml
+    service: dns
+{{ START ACCESS_MODE==FORWARDER }}
+  links:
+    - forwarder:forwarder
+{{ END ACCESS_MODE==FORWARDER }}
+{{ START ACCESS_MODE==HOST }}
+  ports:
+    - "53:53/udp"
+    - "6754:6754"
+{{ END ACCESS_MODE==HOST }}
+

@@ -1,0 +1,27 @@
+#!/bin/bash
+# This assumes there is a Rebar user in the container, which may or
+# may not be mapped to root externally.
+if [[ $HOME != */rebar ]]; then
+    exec su -l -c "$0" rebar
+fi
+if [[ ! -f .chef/rebar.pem ]]; then
+    echo "No rebar.pem!  Cannot upload cookbooks!"
+    exit 1
+fi
+. /etc/profile
+# Chef/Berks uses Faraday which doesn't work right with proxies.
+# Unset them because the chef server is local
+unset http_proxy
+unset https_proxy
+unset no_proxy
+set -e
+set -x
+IFS=$'\n'
+while read -r -s location; do
+   (cd "$location"; knife cookbook upload --force -a -d -o .)
+done < <(find /opt/digitalrebar -path '*/chef/cookbooks' || :)
+
+roles=($(find /opt/digitalrebar -path '*/chef/roles/*.rb' || :))
+if [[ $roles ]]; then
+   knife role from file "${roles[@]}"
+fi

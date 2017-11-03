@@ -1,0 +1,49 @@
+---
+  - name: Add python2.7 repo
+    apt_repository: repo='ppa:fkrull/deadsnakes-python2.7'
+    become: yes
+  - name: Add ruby2.1 repo
+    apt_repository: repo='ppa:brightbox/ruby-ng'
+    become: yes
+  - name: Update repos (was not working from apt:)
+    command: apt-get update -y
+    become: yes
+  - name: Update python [SLOW]
+    command: apt-get upgrade -y
+    become: yes
+  - name: Install Prereqs [SLOW]
+    apt: name={{ item }} state=latest
+    with_items:
+      - git
+      - wget
+      - curl
+      - python
+      - python-pycurl
+      - jq
+    become: yes
+  - name: Install Provisioner Prereqs [SLOW]
+    apt: name={{ item }} state=latest
+    with_items:
+      - ruby2.1
+      - ruby2.1-dev
+      - screen
+      - qemu-kvm
+      - libvirt-bin
+      - ubuntu-vm-builder
+      - bridge-utils
+      - make
+      - gcc
+    become: yes
+    when: "'--provisioner' in dr_services"
+  - name: Provisioner gem install kvm slaves
+    command: gem install json net-http-digest_auth
+    args:
+      creates: /var/lib/gems/2.1.0/gems/json-2.0.2
+    become: yes
+    when: "'--provisioner' in dr_services"
+  - name: stop apparmor
+    command: service apparmor teardown
+    become: yes
+  - name: remove apparmor
+    command: update-rc.d -f apparmor remove
+    become: yes

@@ -1,0 +1,198 @@
+--- 
+  - name: Load tftp nat module
+    modprobe: name=nf_nat_tftp state=present
+    when: dr_access_mode == "FORWARDER" and ansible_os_family != "Darwin"
+    become: yes
+
+  # Stop services that get in the way of progress.
+  - name: Stop ntp
+    service: name=ntp state=stopped enabled=no
+    when: dr_access_mode == "HOST" and ansible_os_family != "Darwin"
+    ignore_errors: yes
+    become: yes
+  - name: Stop ntpd
+    service: name=ntpd state=stopped enabled=no
+    when: dr_access_mode == "HOST" and ansible_os_family != "Darwin"
+    ignore_errors: yes
+    become: yes
+  - name: Stop chronyd
+    service: name=chronyd state=stopped enabled=no
+    when: dr_access_mode == "HOST" and ansible_os_family != "Darwin"
+    ignore_errors: yes
+    become: yes
+  - name: Stop dnsmasq
+    command: killall dnsmasq
+    ignore_errors: yes
+    when: dr_access_mode == "HOST" and ansible_os_family != "Darwin"
+    become: yes
+  - name: Restart Docker (again)
+    service: name=docker state=restarted
+    when: dr_access_mode == "HOST" and ansible_os_family != "Darwin"
+    become: yes
+
+  - name: record home
+    command: echo $HOME
+    register: home_dir
+    tags: stop
+
+  - stat: path={{home_dir.stdout}}/.ssh/id_rsa.pub
+    register: ssh_pub
+
+  - name: Make SSH dirs
+    file: path={{home_dir.stdout}}/.ssh state=directory recurse=yes mode=0700
+
+  - name: create SSH key for host to access slaves
+    command: ssh-keygen -t rsa -f '{{home_dir.stdout}}/.ssh/id_rsa' -P ''
+    when: ssh_pub.stat.exists == False
+    args:
+      creates: "{{home_dir.stdout}}/.ssh/id_rsa.pub"
+
+  - debug: var=dr_services
+
+  - name: Make cache dirs for ISOs
+    command: mkdir -p {{home_dir.stdout}}/.cache/digitalrebar/tftpboot/isos
+    when: "'--provisioner' in dr_services"
+
+  - name: use local ISOs by checking for tftpboot/isos/copy_isos.yes
+    local_action: stat path="./tftpboot/isos/copy_isos.yes"
+    register: local_isos
+
+  - debug: msg="Skipped Optimization > Did not find 'tftpboot/isos/copy_isos.yes' so NOT copying LOCAL ISOs"
+    when: not local_isos.stat.exists
+
+  - name: push tftpboot cache files (RAID and/or ISOs) from local tftpboot (FAST LOCAL but ISOs are SLOW REMOTE!)
+    synchronize: src=./tftpboot dest={{home_dir.stdout}}/.cache/digitalrebar rsync_path="rsync"
+    when: "'--provisioner' in dr_services and local_isos.stat.exists"
+
+  - debug: msg="Installing in {{cloud_type}}...Skipping SLOW Provisioner ISOs"
+    when: cloud_type is defined
+
+  - name: "download {{ubuntu_iso.OS.IsoFile}} (SLOW from {{ubuntu_iso.OS.IsoUrl}})"
+    get_url: url="{{ubuntu_iso.OS.IsoUrl}}" dest="{{home_dir.stdout}}/.cache/digitalrebar/tftpboot/isos/{{ubuntu_iso.OS.IsoFile}}" checksum="sha256:{{ubuntu_iso.OS.IsoSha256}}"
+    when: "'--provisioner' in dr_services and not local_isos.stat.exists and cloud_type is not defined"
+
+  - name: "download {{centos_iso.OS.IsoFile}} (SLOW from {{centos_iso.OS.IsoUrl}})"
+    get_url: url="{{centos_iso.OS.IsoUrl}}" dest="{{home_dir.stdout}}/.cache/digitalrebar/tftpboot/isos/{{centos_iso.OS.IsoFile}}" checksum="sha256:{{centos_iso.OS.IsoSha256}}"
+    when: "'--provisioner' in dr_services and not local_isos.stat.exists and cloud_type is not defined"
+
+  - name: Make cache dirs for RAID drivers
+    command: mkdir -p {{home_dir.stdout}}/.cache/digitalrebar/tftpboot/files/raid
+    when: "'--provisioner' in dr_services and cloud_type is not defined"
+
+  - name: "push RAID/BIOS if in local ~/.cache/digitalrebar/tftpboot/files/raid"
+    synchronize: src=~/.cache/digitalrebar/tftpboot/files/raid/ dest={{home_dir.stdout}}/.cache/digitalrebar/tftpboot/files/raid/ rsync_path="rsync"
+    when: "'--provisioner' in dr_services and cloud_type is not defined"
+
+  - local_action: stat path=~/.netrc
+    register: netrc_path
+
+  - name: copy Github .NetRC for restricted repos
+    synchronize: src=~/.netrc dest={{home_dir.stdout}} rsync_path="rsync"
+    when: netrc_path.stat.exists
+
+  - name: get code (from github)
+    git: repo=https://github.com/digitalrebar/digitalrebar.git dest={{home_dir.stdout}}/digitalrebar
+
+  - name: Make code dirs
+    file: path={{home_dir.stdout}}/digitalrebar/deploy/compose state=directory recurse=yes
+  - name: Link dirs
+    file: src={{home_dir.stdout}}/digitalrebar path={{home_dir.stdout}}/digitalrebar/deploy/compose/digitalrebar state=link
+
+  - name: remove previous data
+    command: rm -rf {{home_dir.stdout}}/digitalrebar/deploy/compose/data-dir
+    become: yes
+
+  - name: replace code (from local system) compose
+    synchronize: src=./compose dest={{home_dir.stdout}}/digitalrebar/deploy rsync_path="rsync"
+    when: dr_clone_deploy is not defined
+
+  - name: replace code (from local system) scripts
+    synchronize: src=./scripts dest={{home_dir.stdout}}/digitalrebar/deploy rsync_path="rsync"
+    when: dr_clone_deploy is not defined
+
+  - name: setup compose
+    command: ./setup.sh --tag {{ dr_tag }} {{ dr_workloads | default([]) | join(" ") }}
+    environment:
+      RACKN_USER: "{{dr_rackn_username|default('')}}"
+      RACKN_PASSWORD: "{{dr_rackn_password|default('')}}"
+    args:
+      chdir: "{{home_dir.stdout}}/digitalrebar/deploy/compose"
+      creates: "{{home_dir.stdout}}/digitalrebar/deploy/compose/digitalrebar/digitalrebar-ux"
+
+  - name: init compose files
+    command: ./init_files.sh --tag {{ dr_tag }} --external_ip {{ dr_external_ip }} --forwarder_ip {{ dr_forwarder_ip | default("0.0.0.0/24") }}  --access {{ dr_access_mode }} {{ dr_services| default([]) | join(" ") }} {{ dr_classifiers| default([]) | join(" ") }}
+    args:
+      chdir: "{{home_dir.stdout}}/digitalrebar/deploy/compose"
+
+  - name: copy user ssh public key to rebar
+    command: cp {{home_dir.stdout}}/.ssh/id_rsa.pub {{home_dir.stdout}}/digitalrebar/deploy/compose/config-dir/api/config/ssh_keys/setup-0.key
+    args:
+      creates: "{{home_dir.stdout}}/digitalrebar/deploy/compose/config-dir/api/config/ssh_keys/setup-0.key"
+
+  - name: get the username running the deploy
+    local_action: command whoami
+    register: username_on_the_host
+    become: no
+    changed_when: False
+
+  - name: Create rebar group
+    group: name=rebar
+    when: ansible_os_family != "Darwin" and username_on_the_host.stdout == "root"
+    become: yes
+  - name: Create rebar user
+    user: name=rebar group=rebar shell=/bin/bash
+    when: ansible_os_family != "Darwin" and username_on_the_host.stdout == "root"
+    become: yes
+  - name: Set files to those permissions
+    command: "chown -R rebar:rebar {{home_dir.stdout}}/digitalrebar"
+    when: ansible_os_family != "Darwin" and username_on_the_host.stdout == "root"
+    become: yes
+
+  - name: Restart Docker (yet again)
+    service: name=docker state=restarted
+    when: ansible_os_family != "Darwin"
+    become: yes
+  - name: allow docker access (without reboot - again)
+    command: chmod 666 /var/run/docker.sock
+    become: yes
+    when: ansible_os_family != "Darwin"
+
+  - name: Pull compose images [SLOW]
+    shell: "DR_TAG={{dr_tag}} /usr/local/bin/docker-compose pull"
+    args:
+      chdir: "{{home_dir.stdout}}/digitalrebar/deploy/compose"
+
+  - name: Ensure containers are off
+    shell: "DR_TAG={{dr_tag}} /usr/local/bin/docker-compose kill"
+    args:
+      chdir: "{{home_dir.stdout}}/digitalrebar/deploy/compose"
+    tags: stop
+
+  - name: Ensure containers are removed
+    shell: "DR_TAG={{dr_tag}} /usr/local/bin/docker-compose rm -f"
+    args:
+      chdir: "{{home_dir.stdout}}/digitalrebar/deploy/compose"
+    tags: stop
+
+  - name: "STARTING Digital Rebar!!! (Compose up -d containers)"
+    shell: "DR_TAG={{dr_tag}} /usr/local/bin/docker-compose up -d"
+    args:
+      chdir: "{{home_dir.stdout}}/digitalrebar/deploy/compose"
+
+  - debug: msg="Expected IP {{dr_external_ip | ipaddr('address')}}"
+    when: dr_access_mode == "HOST" and ansible_version is defined and {{ansible_version.full|version_compare('1.9.0', '>=')}}
+
+  - name: HOSTMODE wait until Digital Rebar service is up [1 upto 20 minutes]
+    wait_for: host="{{dr_external_ip | ipaddr('address')}}" delay=60 timeout=1200
+    when: dr_access_mode == "HOST" and ansible_version is defined and {{ansible_version.full|version_compare('1.9.0', '>=')}}
+
+  - debug: msg="Expected IP {{ansible_default_ipv4.address}}"
+    when: dr_access_mode == "FORWARDER" and ansible_version is defined and {{ansible_version.full|version_compare('1.9.0', '>=')}}
+
+  - name: FORWARDER wait until Digital Rebar service is up [1 upto 20 minutes]
+    wait_for: host="{{ansible_default_ipv4.address}}" delay=60 timeout=1200
+    when: dr_access_mode == "FORWARDER" and ansible_version is defined and {{ansible_version.full|version_compare('1.9.0', '>=')}}
+
+  - name: wait for admin convergence [1 upto 20 minutes]
+    command: "{{home_dir.stdout}}/digitalrebar/deploy/scripts/wait_for_rebar.sh"
+

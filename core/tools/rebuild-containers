@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+if [[ $0 = /* ]]; then
+    mountdir="$0"
+elif [[ $0 = .*  || $0 = */* ]]; then
+    mountdir="$(readlink "$PWD/$0")"
+    if [ "$mountdir" == "" ] ; then
+        mountdir="$PWD/$0"
+    fi
+else
+    echo "Cannot figure out where core is!"
+    exit 1
+fi
+
+# This gets us to core
+mountdir="${mountdir%/core/tools/*}"
+
+CONTAINER_DIR="$mountdir/containers"
+cd "$CONTAINER_DIR"
+exec ./rebuild-containers "$@"

@@ -1,0 +1,11 @@
+--- 
+- name: Install Digital Rebar by RackN 2015
+  hosts: all
+  vars:
+    ubuntu_iso: "{{lookup('file','./compose/config-dir/provisioner/bootenvs/ubuntu-16.04.json')}}"
+    centos_iso: "{{lookup('file','./compose/config-dir/provisioner/bootenvs/centos-7.4.1708.json')}}"
+
+  tasks:
+    - include: tasks/base.yml
+    - include: tasks/docker.yml
+    - include: tasks/compose.yml

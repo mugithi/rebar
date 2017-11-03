@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+
+[[ $DEBUG ]] && set -x
+
+set -o pipefail
+
+#
+# NOTE: When building on MAC, you must set SWS_LISTEN_ADDR to your docker
+# bridge IP (e.g. 192.168.99.1) and accept the mac firewall port allowance.
+#
+
+if ! [[ $1 ]]; then
+    echo "First arg must be name of the file to save the images to!"
+    exit 1
+fi
+
+export PS4='${BASH_SOURCE}@${LINENO}(${FUNCNAME[0]}): '
+[[ $DR_TAG ]] || export DR_TAG="master"
+CONTAINERS=('digitalrebar/base'
+            'digitalrebar/deploy-service-wrapper'
+            'digitalrebar/dr_dns'
+            'digitalrebar/dr_forwarder'
+            'digitalrebar/dr_goiardi'
+            'digitalrebar/dr_ntp'
+            'digitalrebar/dr_postgres'
+            'digitalrebar/dr_provisioner'
+            'digitalrebar/dr_rebar_api'
+            'digitalrebar/dr_rebar_dhcp'
+            'digitalrebar/dr_webproxy'
+            'digitalrebar/cloudwrap'
+            'digitalrebar/dr_node'
+            'digitalrebar/logging'
+            'digitalrebar/dr_rev_proxy'
+            'digitalrebar/dr_trust_me'
+            'digitalrebar/rule-engine'
+            'library/consul'
+           )
+
+images=()
+# First, pull the containers
+for c in "${CONTAINERS[@]}"; do
+    if [[ ${c%/*} = digitalrebar ]]; then
+        tag="${DR_TAG}"
+    else
+        tag=latest
+    fi
+    images+=("${c}:${tag}")
+    docker pull "${c}:${tag}"
+done
+
+# Next, save them
+docker save "${images[@]}" |xz -T0 -1 > "$1"

@@ -1,0 +1,524 @@
+# Copyright (c) 2017 RackN, Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+barclamp:
+  name: flash
+  display: Firmware Flasher
+  version: "2.E"
+
+rebar:
+  layout: 1
+
+attribs:
+  - name: skip-flash
+    map: 'rebar/skip_flash'
+    description: 'Skip trying to flash firmware'
+    documentation: |
+      Skip Flash
+      ----------
+
+      skip-flash tells Rebar to skip performing any flash operations on
+      a machine.   It can be either true or false.
+    schema:
+      type: bool
+      required: true
+    default: false
+  - name: firmware-target-versions
+    map: 'rebar/firmware_targets'
+    description: 'A map of firmware test:version'
+    documentation: |
+      Firmware Target Versions
+      ------------------------
+
+      firmware-target-versions is a per-machine attrib that contains
+      a map of firmware-test -> version overrides, where firmware-test is the
+      name of a test field in the list of tests in the firmware-selection-tests
+      attrib.
+
+      This attrib allows you to pin firmware versions for a specific machine -- in the
+      absence of an entry for a firmware test in this attrib, the firmware-flash role
+      will try to flash up to the latest firmware update package available for a matching test.
+    schema:
+      type: map
+      mapping:
+        =:
+          type: str
+          required: true
+    default: {}
+  - name: firmware-packages
+    map: 'rebar/firmware_packages'
+    description: 'The map of packages that Rebar knows how to flash'
+    documentation: |
+      Firmware Package Information
+      ----------------------------
+
+      The firmware-packages attrib contains all of the firmware packages that
+      Digital Rebar knows how to flash, regardless of system type.  It consists
+      of a JSON object that maps the full filename of the firmware update package
+      to metadata about that package. The metadata is defined as follows:
+
+      ::
+
+        {
+          "source": "The full URL the firmware update package should be downloaded from",
+          "sha256sum": "The SHA256 checksum of the firmware update package",
+          "script": "The script that will be invoked by the firmware-flash role to apply the firmware update"
+        }
+
+      The firmware-flash role expects to be able to download the firmware
+      update package from the provisioner (at $provisioner/files/firmware/$package_name).
+      In order to make the update package available, you need to download the update
+      package from its source, and then upload it to the provisioner with:
+
+      * ``rebar provisioner files upload $downloaded_file as firmware/$package_name``
+
+      The script that applies the firmware update package should take care to reboot the system
+      if that is required to complete the firmware update.
+    default:
+      'iDRAC-with-Lifecycle-Controller_Firmware_XTPX4_LN_2.41.40.40_A00.BIN':
+        sha256sum: '3446d95353373156741b3b6b92515c4747728f57de6d735be6ff3d0fa7bd5d22'
+        source: 'https://downloads.dell.com/FOLDER04020316M/1/iDRAC-with-Lifecycle-Controller_Firmware_XTPX4_LN_2.41.40.40_A00.BIN'
+        script: |
+          #!/usr/bin/env bash
+          if [[ $downgrade == true ]] ; then
+            FORCE="-f"
+          fi
+          chmod 755 "$package"
+          ./"$package" -q -r $FORCE
+          case $? in
+              0)  # No reboot required.
+                    exit 0;;
+              1)  # The update failed.
+                  exit 1;;
+              2)  # Update suceeded, system needs a reboot.
+                  reboot; sleep 600;;
+              3)  # Dependency error, system already up to date
+                  echo "System up to date, but should have been caught by pre-version check"
+                  exit 0;;
+              4|5) # Update not applicable to the system
+                  echo "Update $package not applicable to this system, but not caught by qualification checking"
+                  exit 1;;
+              6) # System is automatically rebooting
+                 sleep 600;;
+              *) # Update package is corrupt or Something Weird happened.
+                 echo "Unexpected exit status $?, something weird happened"
+                exit 1;;
+          esac
+      'SMT_316.zip':
+        sha256sum: '07e82a8a2c83cea9cf567297b5cc87334f602bd919fa43ad070bad55e3cfe775'
+        source: 'http://www.supermicro.com/about/policies/disclaimer.cfm?url=/support/resources/getfile.aspx?ID=2815'
+        script: |
+          #!/usr/bin/env bash
+          unzip -j "$package" 'SMT_316.bin' 'Linux 1.15/lUpdate' 'Linux 1.15/unload_ipmi_driver.sh'
+          chmod 755 lUpdate unload_ipmi_driver.sh
+          ./unload_ipmi_driver.sh
+          if ! ./lUpdate -f SMT_316.bin -i kcs -r y; then
+              echo "Update failed!"
+              exit 1
+          fi
+          echo "Update succeeded.  Will reboot after IPMI controller reboots"
+          sleep 60
+          reboot
+      'X7SPA3_719.zip':
+        sha256sum: 'd430644616bbb7f608b88f87d6ddd6c8ed096cd68d76b8930426d413fab2aa01'
+        source: 'http://www.supermicro.com/about/policies/disclaimer.cfm?url=/support/resources/getfile.aspx?ID=2691'
+        script: |
+          #!/usr/bin/env bash
+          unzip -j "$package" 'X7SPA3.719/X7SPA3.719'
+          if ! flashrom -p internal -w X7SPA3.719 -o flash.log; then
+              echo "Flash failed!"
+              cat flash.log
+              exit 1
+          fi
+          echo "Flash succeeded.  Rebooting."
+          reboot
+          sleep 600
+      'T320_BIOS_8H9VP_LN_2.4.2.BIN':
+        sha256sum: '70514af312ffb7bdd43b9c736497ab0509094afde1fb9e26db7620c8dc31b300'
+        source: 'http://downloads.dell.com/FOLDER02804892M/1/T320_BIOS_8H9VP_LN_2.4.2.BIN'
+        script: |
+          #!/usr/bin/env bash
+          if [[ $downgrade == true ]] ; then
+               FORCE="-f"
+          fi
+          chmod 755 "$package"
+          ./"$package" -q -r $FORCE
+          case $? in
+              0)  # No reboot required.
+                  exit 0;;
+              1)  # The update failed.
+                  exit 1;;
+              2)  # Update suceeded, system needs a reboot.
+                  reboot; sleep 600;;
+              3)  # Dependency error, system already up to date
+                  echo "System up to date, but should have been caught by pre-version check"
+                  exit 0;;
+              4|5) # Update not applicable to the system
+                  echo "Update $package not applicable to this system, but not caught by qualification checking"
+                  exit 1;;
+              6) # System is automatically rebooting
+                 sleep 600;;
+              *) # Update package is corrupt or Something Weird happened.
+                 echo "Unexpected exit status $?, something weird happened"
+                exit 1;;
+          esac
+      'BIOS_DC9XJ_LN_2.1.7.BIN':
+        sha256sum: 'd043e74ef3d720248251acc8bee22e83837e91db9b2f47423484850d9ba28509'
+        source: 'http://downloads.dell.com/FOLDER03775688M/1/BIOS_DC9XJ_LN_2.1.7.BIN'
+        script: |
+          #!/usr/bin/env bash
+          if [[ $downgrade == true ]] ; then
+               FORCE="-f"
+          fi
+          chmod 755 "$package"
+          ./"$package" -q -r $FORCE
+          case $? in
+              0)  # No reboot required.
+                  exit 0;;
+              1)  # The update failed.
+                  exit 1;;
+              2)  # Update suceeded, system needs a reboot.
+                  reboot; sleep 600;;
+              3)  # Dependency error, system already up to date
+                  echo "System up to date, but should have been caught by pre-version check"
+                  exit 0;;
+              4|5) # Update not applicable to the system
+                  echo "Update $package not applicable to this system, but not caught by qualification checking"
+                  exit 1;;
+              6) # System is automatically rebooting
+                 sleep 600;;
+              *) # Update package is corrupt or Something Weird happened.
+                 echo "Unexpected exit status $?, something weird happened"
+                exit 1;;
+          esac
+      'BIOS_T4FMH_LN_2.2.5.BIN':
+        sha256sum: '44851ffeffc11fa9f3a69775b945249f6d09756a4538c49a975a9d9134627608'
+        source: 'http://downloads.dell.com/FOLDER03919045M/1/BIOS_T4FMH_LN_2.2.5.BIN'
+        script: |
+          #!/usr/bin/env bash
+          if [[ $downgrade == true ]] ; then
+               FORCE="-f"
+          fi
+          chmod 755 "$package"
+          ./"$package" -q -r $FORCE
+          case $? in
+              0)  # No reboot required.
+                  exit 0;;
+              1)  # The update failed.
+                  exit 1;;
+              2)  # Update suceeded, system needs a reboot.
+                  reboot; sleep 600;;
+              3)  # Dependency error, system already up to date
+                  echo "System up to date, but should have been caught by pre-version check"
+                  exit 0;;
+              4|5) # Update not applicable to the system
+                  echo "Update $package not applicable to this system, but not caught by qualification checking"
+                  exit 1;;
+              6) # System is automatically rebooting
+                 sleep 600;;
+              *) # Update package is corrupt or Something Weird happened.
+                 echo "Unexpected exit status $?, something weird happened"
+                exit 1;;
+          esac
+    schema:
+      type: map
+      mapping:
+        =:
+          type: map
+          mapping:
+            sha256sum:
+              type: str
+              required: true
+            source:
+              type: str
+              required: true
+            script:
+              type: str
+              required: true
+
+  - name: firmware-selection-tests
+    map: 'rebar/firmware_tests'
+    description: 'The list of selection tests that Rebar knows about to pick firmware to flash'
+    schema:
+      type: seq
+      sequence:
+        - type: map
+          mapping:
+            test:
+              type: str
+              required: true
+            current-version-script:
+              type: str
+              required: true
+            packages:
+              type: seq
+              required: true
+              sequence:
+                - type: map
+                  mapping:
+                    version:
+                      type: str
+                      required: true
+                    package:
+                      type: str
+                      required: true
+                    upgrade-fence:
+                      type: bool
+                      required: false
+                    downgrade-fence:
+                      type: bool
+                      required: false
+            match:
+              type: map
+              required: true
+              mapping:
+                =:
+                  type: str
+                  required: true
+    documentation: |
+      Firmware Selection Tests
+      ------------------------
+
+      The ``firmware-selection-tests`` attrib is used by the ``firmware-flash`` role to
+      determine what firmware update packages (as defined by the ``firmware-packages`` attrib)
+      should be applied to a given system.  It consists of a lists of tests with the
+      following structure:
+
+      ::
+
+        {
+          "test": "The name of the test."
+          "current-version-script": "A shell script that gets the current version of the firmware in question."
+          "packages" [
+            {
+              "package": "The name of the package in the firmware-packages attrib",
+              "version": "The version of the package",
+              "downgrade-fence": true or false,
+              "upgrade-fence": true or false
+            }
+          ],
+          "match": {
+            "dmi_attrib": "value that must match",
+            "other_dmi_attrib": "value that must match"
+          }
+        }
+
+      The packages section of the test structure can contain any number of packages that
+      can be flashed for the specific test.  The packages list must be ordered in ascending version
+      order with the earliest version at the top.
+
+      The keys of each individual entry in the packages list:
+
+      * "package" is the name of the package in the firmware-packages attrib.
+        If there is no matching entry in the firmware-packages attrib and this
+        package was chosen to be run, the update will fail.
+      * "version" is the version of the firmware update package.  The version string
+        should be vaguely semver-ish.
+      * "downgrade-fence" indicates that the formware in question cannot be downgraded
+        past this version.
+      * "upgrade-fence" indicates that this package must be flashed when upgrading to
+        a later version.
+
+      The match section consists of an object whose keys are the names of node attribs, and
+      the values are the exact values that the attrib in question must match exactly.  These
+      are what determines if a given test is applicable to a given system.  The attrib names
+      must be in the following list:
+
+      * bios-vendor
+      * bios-version
+      * bios-revision
+      * system_manufacturer
+      * system_product
+      * baseboard_manufacturer
+      * baseboard_product_name
+      * ipmi-enable
+      * ipmi-firmware-rev
+      * ipmi-device-id
+      * ipmi-device-rev
+      * ipmi-mfgr-id
+      * ipmi-product-id
+      * raid-detected-controllers
+
+    default:
+      - test: 'Supermicro X7SPA-HF Bios'
+        current-version-script: |
+          #!/usr/bin/env bash
+          get_attr bios-version
+        packages:
+          - version: '1.2b'
+            package: 'X7SPA3_719.zip'
+        match:
+          baseboard_manufacturer: 'Supermicro'
+          baseboard_product_name: 'X7SPA-HF'
+      - test: 'Dell PowerEdge T320 Bios'
+        current-version-script: |
+          #!/usr/bin/env bash
+          get_attr bios-version
+        packages:
+          - package: 'T320_BIOS_8H9VP_LN_2.4.2.BIN'
+            version: '2.4.2'
+        match:
+          system_manufacturer: 'Dell Inc.'
+          system_product: 'PowerEdge T320'
+      - test: 'Dell PowerEdge FC630 Bios'
+        current-version-script: |
+          #!/usr/bin/env bash
+          get_attr bios-version
+        packages:
+          - version: '2.1.7'
+            package: 'BIOS_DC9XJ_LN_2.1.7.BIN'
+          - version: '2.2.5'
+            package: 'BIOS_T4FMH_LN_2.2.5.BIN'
+        match:
+          system_manufacturer: 'Dell Inc.'
+          system_product: 'PowerEdge FC630'
+      - test: 'Dell PowerEdge T320 iDRAC'
+        current-version-script: |
+          #!/usr/local/bin/env bash
+          get_attr ipmi-firmware-rev
+        packages:
+          - package: 'iDRAC-with-Lifecycle-Controller_Firmware_XTPX4_LN_2.41.40.40_A00.BIN'
+            version: '2.41'
+        match:
+          system_manufacturer: 'Dell Inc.'
+          system_product: 'PowerEdge T320'
+      - test: 'Supermicro  X7SPA-HF IPMI'
+        current-version-script: |
+          #!/usr/local/bin/env bash
+          get_attr ipmi-firmware-rev
+        packages:
+          - package: 'SMT_316.zip'
+            version: '3.16'
+        match:
+          baseboard_manufacturer: 'Supermicro'
+          baseboard_product_name: 'X7SPA-HF'
+
+roles:
+  - name: flash-discover
+    jig: role-provided
+    description: "Detect which system firmware flash method to use."
+    flags:
+      - implicit
+      - discovery
+    wants-attribs:
+      - enable-flash-subsystem
+    requires:
+      - rebar-inventory
+    preceeds:
+      - bios-discover
+  - name: dell-firmware-flash
+    jig: script
+    description: 'Dell firmware update utilizing the DSU process'
+    documentation: |
+      Dell Firmware Flash
+      -------------------
+
+      The dell-firmware-flash role updates all of the firmware on a supported Dell PowerEdge
+      system that can be performed without user intervention.  It uses the DSU update process
+      as outlined at http://linux.dell.com/repo/hardware/.
+
+      It default to using http://linux.dell.com/repo/hardware/dsu/ as the source for the
+      DSU program and the firmware updates to apply -- by using these repositories, your Dell
+      PowerEdge gear will be kept up-to-date with the latest firmware.  This role also provides
+      attribs that allow you to override which firmware block release to use and which site
+      to pull firmware updates from.
+    flags:
+      - implicit
+    conflicts:
+      - firmware-flash
+    provides:
+      - firmware-flash
+    requires:
+      - ipmi-discover
+      - bios-discover
+      - raid-discover
+      - flash-discover
+    wants-attribs:
+      - enable-flash-subsystem
+      - skip-flash
+    attribs:
+      - name: dell-dsu-block-release
+        map: dell/firmware/block_release
+        description: 'The block release to pull firmware from.  Defaults to the latest block release.'
+        documentation: |
+          Dell DSU Block Release
+          ----------------------
+
+          The dell-dsu-block-release attrib tells the Dell firmware update process which block
+          release to pull firmware from.  If left unspecified, it will default to the latest
+          block release.
+        default: ''
+        schema:
+          type: str
+          required: false
+      - name: dell-dsu-base-url
+        map: dell/firmware/base_url
+        default: "http://linux.dell.com/repo/hardware/dsu"
+        description: 'The base URL that the DSU tool will pull updates from'
+        documentation: |
+          Dell DSU Base URL
+          -----------------
+
+          The dell-dsu-base-url attrib tells the Dell firmware update process where the OS
+          dependent and OS independent repos it should pull packages and BIOS updates from are at.
+          It defaults to linux.dell.com/repo/harware/dsu/.
+          If the dell-dsu-block-release attrib is set, the value of that attrib will be appended
+          to the URL.
+        schema:
+          type: str
+          required: false
+      - name: dell-dsu-inventory
+        map: dell/firmware/firmware-inventory
+        description: "The final firmware inventory of the system"
+  - name: firmware-flash
+    jig: script
+    flags:
+      - implicit
+    conflicts:
+      - dell-firmware-flash
+    requires:
+      - ipmi-discover
+      - bios-discover
+      - raid-discover
+      - flash-discover
+    wants-attribs:
+      - enable-flash-subsystem
+      - skip-flash
+      - bios-vendor
+      - bios-version
+      - bios-revision
+      - system_manufacturer
+      - system_product
+      - baseboard_manufacturer
+      - baseboard_product_name
+      - provisioner-webservers
+      - ipmi-enable
+      - ipmi-firmware-rev
+      - ipmi-device-id
+      - ipmi-device-rev
+      - ipmi-mfgr-id
+      - ipmi-product-id
+      - raid-detected-controllers
+      - firmware-target-versions
+      - firmware-packages
+      - firmware-selection-tests
+    documentation: |
+      Firmware Flash
+      --------------
+
+      The firmware-flash role is responsible for flashing firmware of all types on a node,
+      subject to the following restrictions:
+
+      * There is no system-specific firmware flash method, like the Dell firmware flasher
+      * All flash operations must be able to run in a Centos 7.x environment.

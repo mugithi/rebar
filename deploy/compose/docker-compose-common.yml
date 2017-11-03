@@ -1,0 +1,244 @@
+
+consul:
+  image: consul
+  restart: always
+  volumes:
+    - ./config-dir/consul/server-default.json:/consul/config/default.json
+    - ./config-dir/consul/server-advertise.json:/consul/config/server-advertise.json
+    - ./data-dir/consul/:/consul/data/
+  env_file:
+    - ./common.env
+    - ./access.env
+
+trust_me:
+  image: digitalrebar/dr_trust_me:${DR_TAG}
+  restart: always
+  privileged: true
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+postgres:
+  image: digitalrebar/dr_postgres:${DR_TAG}
+  restart: always
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./config-dir/postgres/initdb.d:/docker-entrypoint-initdb.d
+    - ./data-dir/postgresql/:/var/lib/postgresql/
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+webproxy:
+  image: digitalrebar/dr_webproxy:${DR_TAG}
+  restart: always
+  privileged: true
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+goiardi:
+  image: digitalrebar/dr_goiardi:${DR_TAG}
+  restart: always
+  volumes:
+    - ./data-dir/goiardi:/var/cache/goiardi
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+rebar_api:
+  image: digitalrebar/dr_rebar_api:${DR_TAG}
+  restart: always
+  privileged: true
+  volumes:
+    - ./digitalrebar:/opt/digitalrebar
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./config-dir/api/config:/opt/digitalrebar/core/config
+    - ./tftpboot:/tftpboot
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./data-dir/rebar-logs:/var/log
+    - ./config-dir/tools:/opt/tools
+    # development mapping for playbook authors
+    # - ../../digitalrebar-workloads/:/var/cache/rebar/ansible_playbook/k8
+    # - ./galaxy:/etc/ansible/roles/  # reminder: sudo chown root:root galaxy
+  env_file:
+    - ./common.env
+    - ./access.env
+    - ./services.env
+
+ntp:
+  image: digitalrebar/dr_ntp:${DR_TAG}
+  privileged: true
+  restart: always
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+cloudwrap:
+  image: digitalrebar/cloudwrap:${DR_TAG}
+  privileged: true
+  restart: always
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+    # debugging maps
+    # - ../../containers/cloudwrap/cloudwrap/api.rb:/opt/cloudwrap/api.rb
+    # - ../../containers/cloudwrap/cloudwrap/common.rb:/opt/cloudwrap/common.rb
+  env_file:
+    - ./common.env
+    - ./access.env
+
+dns:
+  image: digitalrebar/dr_dns:${DR_TAG}
+  restart: always
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./config-dir/bind/named.conf:/etc/bind/named.conf.tmpl
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+dhcp:
+  image: digitalrebar/dr_rebar_dhcp:${DR_TAG}
+  restart: always
+  privileged: true
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+provisioner:
+  image: digitalrebar/dr_provisioner:${DR_TAG}
+  privileged: true
+  restart: always
+  volumes:
+    - ./config-dir/provisioner:/opt/provisioner-mgmt
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./tftpboot:/tftpboot
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+logging:
+  image: digitalrebar/logging:${DR_TAG}
+  privileged: true
+  restart: always
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./data-dir/node-logs:/var/log/nodes
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+elasticsearch:
+  image: elasticsearch
+  volumes:
+    - ./config-dir/elasticsearch:/usr/share/elasticsearch/config
+    - ./data-dir/bin:/usr/local/dev/bin
+
+logstash:
+  image: logstash
+  volumes:
+    - ./config-dir/logstash/logstash.conf:/etc/logstash.conf
+    - ./data-dir/bin:/usr/local/dev/bin
+  environment:
+    # otherwise logstash will keep sending its own logs to itself over and
+    # over... not fun
+    LOGSPOUT: ignore
+  command: -f /etc/logstash.conf
+
+kibana:
+  image: kibana
+  volumes:
+    - ./config-dir/kibana/kibana.yml:/tmp/kibana-4.1.1-linux-x64/config/kibana.yml
+  ports:
+    - "5601:5601"
+
+logspout:
+  image: gliderlabs/logspout
+  volumes:
+    - /var/run/docker.sock:/tmp/docker.sock
+  command: syslog://localhost:5000
+
+cadvisor:
+  image: google/cadvisor:latest
+  volumes:
+    - /:/rootfs:ro
+    - /var/run:/var/run:rw
+    - /sys:/sys:ro
+    - /var/lib/docker/:/var/lib/docker:ro
+  ports:
+    - "8181:8080"
+
+forwarder:
+  image: digitalrebar/dr_forwarder:${DR_TAG}
+  restart: always
+  privileged: true
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+
+    - ./access.env
+  ports:
+    - "3000:3000"
+    - "443:443"
+
+revproxy:
+  image: digitalrebar/dr_rev_proxy:${DR_TAG}
+  privileged: true
+  restart: always
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./config-dir/rev-proxy/db-store.json:/etc/rev-proxy/db-store.json
+    - ./config-dir/rev-proxy/saml-dir:/etc/rev-proxy/saml-dir
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env
+
+node:
+  image: digitalrebar/dr_node:${DR_TAG}
+  privileged: true
+  env_file:
+    - ./access.env
+
+rule-engine:
+  image: digitalrebar/rule-engine:${DR_TAG}
+  restart: always
+  volumes:
+    - ./config-dir/consul/client-default.json:/etc/consul.d/default.json
+    - ./data-dir/bin:/usr/local/dev/bin
+    - ./config-dir/tools:/opt/tools
+  env_file:
+    - ./common.env
+    - ./access.env

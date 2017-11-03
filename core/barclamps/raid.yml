@@ -1,0 +1,470 @@
+# Copyright (c) 2013 Dell Inc.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+barclamp:
+  name: raid
+  display: RAID
+  version: "2.E"
+
+rebar:
+  layout: 1
+
+roles:
+  - name: raid-tools-install
+    description: 'Install RAID management tools on a managed node'
+    documentation: |
+      The raid-tools-install role is responsible for installing all tools needed
+      to manage the RAID adaptors in the system.
+    jig: chef
+    requires:
+      - provisioner-service
+    flags:
+      - implicit
+    events:
+      - endpoint: inproc://role:raid-tools-install/on_active
+        selectors:
+          - event: on_active
+            obj_class: role
+            obj_id: raid-tools-install
+    attribs:
+      - name: raid-drivers
+        description: 'The backend drivers that the RAID barclamp can use'
+        documentation: |
+          Raid Drivers
+          ------------
+
+          This describes how to install the executable files for the RAID drivers
+          the RAID management subsystem knows how to handle.  Modifying this
+          may break the RAID subsystem, so do not modify this unless you know
+          what you are doing.
+        map: 'raid/drivers'
+        ui_renderer: 'barclamp_raid/attribs/raid_tools_install'
+        schema:
+          type: seq
+          sequence:
+            - type: map
+              mapping:
+                "name": { type: str, required: true }
+                "type": { type: str, required: true }
+                "raid_levels":
+                  type: seq
+                  sequence:
+                    - type: str
+                "executable": { type: str, required: true }
+                "archive": { type: str, required: true }
+                "source": { type: str, required: true }
+                "linux_installcode": { type: str, required: true }
+        default:
+          - "name": "storcli7"
+            "type": "BarclampRaid::Lsi_Storcli"
+            "raid_levels":
+              - "jbod"
+              - "raid0"
+              - "raid1"
+              - "raid5"
+              - "raid6"
+              - "raid10"
+              - "raid50"
+              - "raid60"
+            "executable": "/opt/MegaRAID/storcli7/storcli64"
+            "archive": "007.0205.0000.0000_Unified_StorCLI.zip"
+            "source": "https://docs.broadcom.com/docs/007.0205.0000.0000_Unified_StorCLI.zip"
+            "linux_installcode": |
+              unzip -j -o 007.0205.0000.0000_Unified_StorCLI.zip Unified_storcli_all_os.zip
+              unzip -j -o Unified_storcli_all_os.zip unified_storcli_all_os/Linux/storcli-007.0205.0000.0000-1.noarch.rpm
+              rpm2cpio storcli-007.0205.0000.0000-1.noarch.rpm | (cd /; cpio -idmv)
+              mv /opt/MegaRAID/storcli /opt/MegaRAID/storcli7
+          - "name": "storcli6"
+            "type": "BarclampRaid::Lsi_Storcli"
+            "raid_levels":
+              - "jbod"
+              - "raid0"
+              - "raid1"
+              - "raid5"
+              - "raid6"
+              - "raid10"
+              - "raid50"
+              - "raid60"
+            "executable": "/opt/MegaRAID/storcli6/storcli64"
+            "archive": "1.23.02_StorCLI.zip"
+            "source": "https://docs.broadcom.com/docs/1.23.02_StorCLI.zip"
+            "linux_installcode": |
+              unzip -j -o 1.23.02_StorCLI.zip storcli_All_OS.zip
+              unzip -j -o storcli_All_OS.zip storcli_All_OS/Linux/storcli-1.23.02-1.noarch.rpm
+              rpm2cpio storcli-1.23.02-1.noarch.rpm | (cd /; cpio -idmv)
+              mv /opt/MegaRAID/storcli /opt/MegaRAID/storcli6
+          - "name": "megacli"
+            "type": "BarclampRaid::Lsi_Megacli"
+            "raid_levels":
+              - "jbod"
+              - "raid0"
+              - "raid1"
+              - "raid5"
+              - "raid6"
+              - "raid10"
+              - "raid50"
+              - "raid60"
+            "executable": "/opt/MegaRAID/MegaCli/MegaCli64"
+            "archive": "8.07.14_MegaCLI.zip"
+            "source": "https://docs.broadcom.com/docs/12351587"
+            "linux_installcode": |
+              pkg=Linux/MegaCli-8.07.14-1.noarch.rpm
+              unzip -j -o 8.07.14_MegaCLI.zip $pkg && rpm2cpio ${pkg##*/} |(cd /; cpio -idmv)
+          - "name": "sas2ircu"
+            "type": "BarclampRaid::Lsi_Sas2ircu"
+            "raid_levels":
+              - "jbod"
+              - "raid0"
+              - "raid1"
+              - "raid10"
+            "executable": "/usr/sbin/sas2ircu"
+            "archive": "SAS2IRCU_P20.zip"
+            "source": "https://docs.broadcom.com/docs/SAS2IRCU_P20.zip"
+            "linux_installcode": "cd /usr/sbin && unzip -j -o '/tmp/SAS2IRCU_P20.zip' 'SAS2IRCU_P20/sas2ircu_linux_x86_rel/sas2ircu' && chmod 755 sas2ircu"
+    wants-attribs:
+      - provisioner-webservers
+      - enable-raid-subsystem
+  - name: raid-discover
+    description: 'Discover and inventory hardware RAID controllers on the system'
+    documentation: |
+      The raid-discover role is responsible for detecting ant hardware RAID controllers
+      attached to the system and performing a basicn inventory of them.  The
+      results will be saved to the raid-detected-controllers attrib.
+    jig: role-provided
+    flags:
+      - discovery
+      - implicit
+    preceeds:
+      - rebar-managed-node
+    requires:
+      - rebar-inventory
+      - raid-tools-install
+    attribs:
+      - name: raid-detected-controllers
+        description: "The RAID controllers that were detected on this node."
+        documentation: |
+          The raid-detected-controllers attrib holds information on all of the
+          hardware raid controllers Rebar is able to manage on a node. It consists
+          of a list of objects that describe the detected information for each controller.
+
+          A sample is below::
+
+            [
+              {
+                "bus": 8,
+                "device": 0,
+                "device_id": "005b",
+                "driver_name": "megacli",
+                "firmware_package": "21.3.2-0005",
+                "firmware_version": "3.131.05-4520",
+                "function": 0,
+                "id": "0",
+                "native_jbod": false,
+                "product_name": "PERC H710 Adapter",
+                "raid_capable": true,
+                "serial_number": "45D00BX",
+                "sub_device_id": "1f35",
+                "sub_vendor_id": "1028",
+                "supported_raid_levels": [
+                  "raid0",
+                  "raid1",
+                  "raid5",
+                  "raid6",
+                  "raid10",
+                  "raid50",
+                  "raid60",
+                  "jbod"
+                ],
+                "vendor_id": "1000",
+                "disks": [
+                  {
+                    "controller_id": "0",
+                    "disk_size": 4.99558383616e+11,
+                    "driver_name": "megacli",
+                    "enclosure": "",
+                    "media_type": "disk",
+                    "protocol": "sata",
+                    "sas_address": "0x4433221107000000",
+                    "slot": "0",
+                    "status": "Online, Spun Up"
+                  },
+                  {
+                    "controller_id": "0",
+                    "disk_size": 4.99558383616e+11,
+                    "driver_name": "megacli",
+                    "enclosure": "",
+                    "media_type": "disk",
+                    "protocol": "sata",
+                    "sas_address": "0x4433221106000000",
+                    "slot": "1",
+                    "status": "Online, Spun Up"
+                  },
+                  {
+                    "controller_id": "0",
+                    "disk_size": 4.99558383616e+11,
+                    "driver_name": "megacli",
+                    "enclosure": "",
+                    "media_type": "disk",
+                    "protocol": "sata",
+                    "sas_address": "0x4433221105000000",
+                    "slot": "2",
+                    "status": "Online, Spun Up"
+                  },
+                  {
+                    "controller_id": "0",
+                    "disk_size": 4.99558383616e+11,
+                    "driver_name": "megacli",
+                    "enclosure": "",
+                    "media_type": "disk",
+                    "protocol": "sata",
+                    "sas_address": "0x4433221104000000",
+                    "slot": "3",
+                    "status": "Online, Spun Up"
+                  }
+                ],
+                "volumes": [
+                  {
+                    "controller_id": "0",
+                    "driver_name": "megacli",
+                    "id": "0",
+                    "name": "os",
+                    "raid_level": "raid10",
+                    "span_length": 2,
+                    "spans": 2,
+                    "status": "Optimal",
+                    "stripe_size": 65536,
+                    "vol_size": 9.99116767232e+11
+                    "disks": [
+                      {
+                        "controller_id": "0",
+                        "disk_size": 4.99558383616e+11,
+                        "driver_name": "megacli",
+                        "enclosure": "",
+                        "media_type": "disk",
+                        "protocol": "sata",
+                        "sas_address": "0x4433221107000000",
+                        "slot": "0",
+                        "status": "Online, Spun Up"
+                      },
+                      {
+                        "controller_id": "0",
+                        "disk_size": 4.99558383616e+11,
+                        "driver_name": "megacli",
+                        "enclosure": "",
+                        "media_type": "disk",
+                        "protocol": "sata",
+                        "sas_address": "0x4433221106000000",
+                        "slot": "1",
+                        "status": "Online, Spun Up"
+                      },
+                      {
+                        "controller_id": "0",
+                        "disk_size": 4.99558383616e+11,
+                        "driver_name": "megacli",
+                        "enclosure": "",
+                        "media_type": "disk",
+                        "protocol": "sata",
+                        "sas_address": "0x4433221105000000",
+                        "slot": "2",
+                        "status": "Online, Spun Up"
+                      },
+                      {
+                        "controller_id": "0",
+                        "disk_size": 4.99558383616e+11,
+                        "driver_name": "megacli",
+                        "enclosure": "",
+                        "media_type": "disk",
+                        "protocol": "sata",
+                        "sas_address": "0x4433221104000000",
+                        "slot": "3",
+                        "status": "Online, Spun Up"
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+        map: 'rebar_wall/raid/controllers'
+      - name: raid-debug
+        description: "Whether to run the RAID recipes with debugging enabled"
+        map: 'raid/debug'
+        default: false
+        schema:
+          type: bool
+    wants-attribs:
+      - enable-raid-subsystem
+  - name: raid-configure
+    description: 'Configure RAID volumes on a node'
+    documentation: |
+      raid-configure is responsible for configuring RAID volumes (if raid-enable is true)
+      according to the specification provided by the raid-wanted-volumes attrib.
+
+      The creation process is detailed in the documentation for the raid-wanted-volumes attrib.
+    jig: role-provided
+    flags:
+      - implicit
+      - destructive
+    requires:
+      - raid-discover
+      - firmware-flash
+      - rebar-managed-node
+    preceeds:
+      - rebar-hardware-configured
+    attribs:
+      - name: raid-enable
+        description: "Whether or not to use the RAID controllers on a specific node."
+        map: 'raid/enable'
+        default: true
+        schema:
+          type: bool
+      - name: raid-wanted-volumes
+        description: "How RAID shold be configured on this node."
+        documentation: |
+          Describing RAID Volumes to Create
+          =================================
+
+          To have Digital Rebar create RAID volumes other than the default (a
+          single JBOD for the OS volume), you need to ensure that the
+          ``raid-wanted-volumes`` attrib is configured for the system (either
+          directly on the system or via a profile that is bound to the system).
+
+          raid-wanted-volumes contains a list of desired RAID arrays for a given
+          system.  This list contains a series of JSON objects in the following
+          format:
+
+          ::
+
+            {
+              "name": "name of the volume",
+              "raid_level": "target raid level",
+              "size": "min" or "max" or available size in bytes of the volume,
+              "disks": number of physical disks to use in the array,
+              "exclusive": true or false,
+              "disk_type": nil or "ssd" or "disk",
+              "protocol": nil or "sas" or "sata",
+              "force_good": true or false,
+              "controller_id": "The ID of the controller from the raid-detected-controllers attrib"
+            }
+
+          To actually build the RAID volume, the underlying physical disks
+          are bucketized according to the following rules:
+
+            1. If the ``exclusive`` flag is set, then physical disks that
+               already have a volume on them are ignored by the rest of the
+               bucketization rules.
+            2. Sort the physical disks into 4 top level buckets based on their
+               disk_type and protocol
+            3. In each bucket created above, subdivide the disks it has into
+               size-buckets based on the amount of free space each has in 32
+               gigabyte increments.
+
+          If the size is neither "min" nor "max", calculate the per-disk size
+          requirement based on the raid_level and the requested final size of
+          the array.
+
+          Walk over the top-level buckets in the following order:
+
+            1. disk/sas
+            2. disk/sata
+            3. ssd/sas
+            4. ssd/sata
+
+          * If the desired RAID array has disk_type or protocol set, then top
+            level buckets that do not match the set values are ignored.
+
+          * If the size is "min", look at the size-buckets in ascending order, and pick the
+            first one that can satisfy the volume creation request.
+
+          * If the size is "max", look at the size-buckets in descending order,
+            and pick the first one that can satisfy the volume creation request.
+
+          * Otherwise, look at the size-buckets in ascending order starting with
+            the smallest one that satisfies the per-disk dize requirements, and
+            pick the first one that can satisfy the volume creation request.
+
+          * If a size-bucket was found that can satisfy the volume creation
+            request, grab the number of required disks (sorted by the underlying
+            RAID controllers notion of the disk ID in ascending order) from the
+            bucket and create volume, forcing the individual disks to be "good"
+            if force_good is set.  Otherwise move on to the next applicable
+            top-level bucket and try again.
+        map: 'raid/volumes/wanted'
+        default:
+          - name: "os"
+            raid_level: "jbod"
+            disks: 1
+            size: "min"
+            boot: true
+        schema:
+          type: seq
+          sequence:
+            - type: map
+              mapping:
+                "name": { type: str, required: true }
+                "raid_level":
+                  type: str
+                  required: true
+                  enum:
+                    - jbod
+                    - raid0
+                    - raid1
+                    - raid5
+                    - raid6
+                    - raid00
+                    - raid50
+                    - raid60
+                    - raid10
+                "stripe_size": { type: int }
+                "size": { type: scalar, required: true }
+                "disks": { type: int, required: false }
+                "controller_index": { type: int, required: false }
+                "force_good": { type: bool, required: false }
+                "disks_type":
+                  type: str
+                  enum:
+                    - ssd
+                    - disk
+                  required: false
+                "exclusive": { type: bool, required: false }
+                "boot": { type: bool, required: false }
+                "protocol":
+                  type: str
+                  enum:
+                    - sas
+                    - sata
+                  required: false
+      - name: raid-configured-volumes
+        description: "The current RAID volumes on this node"
+        map: 'raid/volumes/configured'
+    wants-attribs:
+      - enable-raid-subsystem
+  - name: raid-post-configure
+    jig: chef
+    description: 'Update ohai data after the RAID volumes are configured.'
+    documentation: |
+      After the RAID volumes have been created by the raid-configure role,
+      the ohai data stored for the OS visible disks will be out of date.
+      raid-post-conifgure is responsible for rerunning chef-client in order
+      to gather updated ohai data representing the current disk configuration
+      as seen by the OS.
+    requires:
+      - raid-configure
+    preceeds:
+      - rebar-hardware-configured
+    flags:
+      - implicit
+hammers:
+  - name: raid-hammer
+    type: 'BarclampRaid::RaidHammer'
+    priority: 5

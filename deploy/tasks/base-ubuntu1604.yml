@@ -1,0 +1,47 @@
+---
+  - name: Update repos (was not working from apt:)
+    command: apt-get update -y
+    become: yes
+  - name: Install Prereqs [SLOW]
+    apt: name={{ item }} state=latest
+    with_items:
+      - git
+      - curl
+      - wget
+      - python
+      - python-pycurl
+      - jq
+    become: yes
+  - name: Install Provisioner Prereqs [SLOW]
+    apt: name={{ item }} state=latest
+    with_items:
+      - screen
+      - qemu-kvm
+      - libvirt-bin
+      - ubuntu-vm-builder
+      - bridge-utils
+      - ruby-dev
+      - make
+    become: yes
+    when: "'--provisioner' in dr_services"
+  - name: Provisioner gem install kvm slaves
+    command: gem install json net-http-digest_auth
+    args:
+      creates: /var/lib/gems/1.9.1/cache/json-1.8.3.gem
+    become: yes
+    when: "'--provisioner' in dr_services"
+
+  - name: Detect if AppArmor is working.
+    command: service apparmor status
+    register: apparmor_status
+    failed_when: false
+    changed_when: false
+  - debug: var=apparmor_status
+  - name: stop apparmor
+    command: service apparmor teardown
+    become: yes
+    when: "apparmor_status.rc != 3"
+  - name: remove apparmor
+    command: update-rc.d -f apparmor remove
+    become: yes
+    when: "apparmor_status.rc != 3"
